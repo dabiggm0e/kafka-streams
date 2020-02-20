@@ -23,6 +23,7 @@ public class WordCount {
     static String inputTopic = "streams-wordcount-input";
     static String outputTopic = "streams-wordcount-output";
 
+
     static Properties getStreamsConfig() {
         Properties config = new Properties();
         config.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
