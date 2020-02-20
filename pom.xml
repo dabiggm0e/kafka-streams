@@ -10,6 +10,7 @@
     <version>1.0-SNAPSHOT</version>
     <modules>
         <module>word-count</module>
+        <module>favorite-color</module>
     </modules>
 
 </project>
