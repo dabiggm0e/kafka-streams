@@ -1,81 +1,159 @@
 package com.github.dabiggm0e.kafka.streams;
 
 import com.google.gson.JsonObject;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.google.gson.JsonParser;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.Named;
+import org.apache.kafka.streams.kstream.Produced;
 
-import java.lang.reflect.Array;
-import java.text.DateFormat;
 import java.text.DecimalFormat;
-import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Properties;
+import java.util.logging.Logger;
 
 public class BankBalanceApp {
-    static Logger logger = LoggerFactory.getLogger(BankBalanceApp.class);
 
-    public static JsonObject createTransaction(String name, Double amount) {
-        JsonObject transactionJson = new JsonObject();
+    static  String applicationId = "bank-balance";
+    static String bootstrapServers = "localhost:9092";
+    static String inputTopic = "bank-transactions";
+    static String outputTopic = "bank-accounts";
 
-        TimeZone tz = TimeZone.getTimeZone("UTC");
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss"); // Quoted "Z" to indicate UTC, no timezone offset
-        df.setTimeZone(tz);
-        String nowAsISO = df.format(new Date());
+    static JsonParser jsonParser = new JsonParser();
 
-        transactionJson.addProperty("name", name);
-        transactionJson.addProperty("amount", amount);
-        transactionJson.addProperty("time", nowAsISO );
+    static Properties getStreamsConfig() {
+        Properties config = new Properties();
+        config.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
+        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        config.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(StreamsConfig.PROCESSING_GUARANTEE_CONFIG, "exactly_once");
 
-        return transactionJson;
+        //  disable the cache to demonstrate all the "steps" involved in the transformation - not recommended in prod
+        config.put(StreamsConfig.CACHE_MAX_BYTES_BUFFERING_CONFIG, "0");
+
+        return config;
+    }
+
+    public static String parseCustomerName(String jsonRequest) {
+        Logger logger = Logger.getLogger(BankBalanceApp.class.getName());
+        String name;
+
+        try {
+             name = jsonParser.parse(jsonRequest)
+                    .getAsJsonObject()
+                    .get("name")
+                    .getAsString();
+
+        } catch (NullPointerException e) {
+            logger.info("Bad data: " + jsonRequest);
+            return "";
+        }
+
+        return name;
+    }
+
+    public static Double parseTransactionAmount(String jsonRequest) {
+        Logger logger = Logger.getLogger(BankBalanceApp.class.getName());
+        Double amount;
+        DecimalFormat df = new DecimalFormat("#.##");
+
+        try {
+            amount = jsonParser.parse(jsonRequest)
+                    .getAsJsonObject()
+                    .get("amount")
+                    .getAsDouble();
+
+        } catch (NullPointerException e) {
+            logger.info("Bad data: " + jsonRequest);
+            return 0.0;
+        }
+
+        return  Double.valueOf(df.format(amount));
+    }
+
+    public static String parseTransactionTime(String jsonRequest) {
+        Logger logger = Logger.getLogger(BankBalanceApp.class.getName());
+        String time;
+
+        try {
+            time = jsonParser.parse(jsonRequest)
+                    .getAsJsonObject()
+                    .get("time")
+                    .getAsString();
+
+        } catch (NullPointerException e) {
+            logger.info("Bad data: " + jsonRequest);
+            return "";
+        }
+
+        return time;
+    }
+
+    public static JsonObject getTransactionJson(String name, Double amount, String time) {
+        JsonObject transaction = new JsonObject();
+
+        DecimalFormat df = new DecimalFormat("#.##");
+
+
+        transaction.addProperty("name", name);
+        transaction.addProperty("amount", Double.valueOf(df.format(amount)));
+        transaction.addProperty("time", time);
+
+        return transaction;
+    }
+
+    static void createBankBalanceStream(final StreamsBuilder builder) {
+        // stream from kakfa
+
+
+        KStream<String, String> transactionsStream = builder.stream(inputTopic);
+
+        KTable<String, String> balancesTable = transactionsStream
+                .filterNot((key, value) -> parseCustomerName(value).equals("") )// filter out transactions without names
+                .selectKey((key, value) -> parseCustomerName(value)) // select customer name as key in case key wasn't populated by the producer
+                .groupByKey()
+                .reduce(
+                        (oldValue, newValue) -> getTransactionJson(
+                                parseCustomerName(newValue),
+                                parseTransactionAmount(oldValue) + parseTransactionAmount(newValue),
+                                parseTransactionTime(newValue)
+                        ).toString()
+                );
+
+        balancesTable.toStream().to(
+                outputTopic,
+                Produced.with(Serdes.String(), Serdes.String()));
+        // write back to kafka */
     }
 
 
-    public static void main(String[] args) throws InterruptedException {
-        String bootstrap_servers = "localhost:9092";
-        String topic = "bank-transactions";
+    public static void main(String[] args) {
 
-        String[] customers =  new String[]{"John", "Smith", "Mike", "David", "Brown", "White"};
-        Double maxAmount = 1000.0;
+        Properties config = getStreamsConfig();
 
-        // create producer properties
-        Properties properties = new Properties();
+        StreamsBuilder builder = new StreamsBuilder();
+        createBankBalanceStream(builder);
 
-        properties.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrap_servers);
-        properties.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        properties.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
 
-        // create producer
-        KafkaProducer<String, String> producer = new KafkaProducer<>(properties);
+        final KafkaStreams streams = new KafkaStreams(builder.build(), config);
 
-        Random ran = new Random();
-        DecimalFormat df = new DecimalFormat("#.##");
+        // only do this in dev - not in prod
+        streams.cleanUp();
 
-        Integer index = 0;
+        streams.start();
 
-        while(true) {
-            ++index;
+        // print the topology
+        System.out.println(builder.build().describe());
 
-            Integer randomCustomerIndex = ran.nextInt(customers.length);
-            Double randomAmount = (ran.nextDouble() * maxAmount);
-            randomAmount = Double.valueOf(df.format(randomAmount));
-            String customer = customers[randomCustomerIndex];
-
-            JsonObject transaction = createTransaction(customer, randomAmount);
-
-            // create producer record
-            ProducerRecord<String, String> record = new ProducerRecord<>(topic, customer, transaction.toString());
-            producer.send(record);
-
-            logger.info(transaction.toString());
-            if(index==100) {
-                index = 0;
-                Thread.sleep(1000);
-            }
-
-        }
-
+        Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
     }
 }
