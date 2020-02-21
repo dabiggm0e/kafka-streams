@@ -11,6 +11,7 @@
     <modules>
         <module>word-count</module>
         <module>favorite-color</module>
+        <module>bank-balance</module>
     </modules>
 
 </project>
