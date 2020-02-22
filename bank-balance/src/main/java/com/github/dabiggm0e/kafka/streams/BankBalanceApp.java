@@ -116,9 +116,10 @@ public class BankBalanceApp {
 
 
         KStream<String, String> transactionsStream = builder.stream(inputTopic);
+        KStream<String, String> filteredTransactionsStream = transactionsStream
+                .filterNot((key, value) -> parseCustomerName(value).equals("") );// filter out transactions without names
 
-        KTable<String, String> balancesTable = transactionsStream
-                .filterNot((key, value) -> parseCustomerName(value).equals("") )// filter out transactions without names
+        KTable<String, String> balancesTable = filteredTransactionsStream
                 .selectKey((key, value) -> parseCustomerName(value)) // select customer name as key in case key wasn't populated by the producer
                 .groupByKey()
                 .reduce(
@@ -133,6 +134,7 @@ public class BankBalanceApp {
                 outputTopic,
                 Produced.with(Serdes.String(), Serdes.String()));
         // write back to kafka */
+
     }
 
 
