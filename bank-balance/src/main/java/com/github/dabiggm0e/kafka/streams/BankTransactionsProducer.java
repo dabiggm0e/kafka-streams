@@ -11,24 +11,29 @@ import org.slf4j.LoggerFactory;
 import java.text.DateFormat;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
+import java.time.Instant;
 import java.util.*;
 
 public class BankTransactionsProducer {
     static Logger logger = LoggerFactory.getLogger(BankTransactionsProducer.class);
+    static final Double maxAmount = 10.0;
 
-    public static JsonObject createTransaction(String name, Double amount) {
+    public static JsonObject createTransaction(String name) {
+        Random ran = new Random();
+        DecimalFormat df = new DecimalFormat("#.##");
+
+        Double randomAmount = (ran.nextDouble() * maxAmount);
+        randomAmount = Double.valueOf(df.format(randomAmount));
+
         JsonObject transactionJson = new JsonObject();
-
-        TimeZone tz = TimeZone.getTimeZone("UTC");
-        DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.S"); // Quoted "Z" to indicate UTC, no timezone offset
-        df.setTimeZone(tz);
-        String nowAsISO = df.format(new Date());
 
         DecimalFormat dcf = new DecimalFormat("#.##");
 
+        Instant now =  Instant.now();
+
         transactionJson.addProperty("name", name);
-        transactionJson.addProperty("amount", Double.valueOf(dcf.format(amount)));
-        transactionJson.addProperty("time", nowAsISO );
+        transactionJson.addProperty("amount", randomAmount);
+        transactionJson.addProperty("time", now.toString() );
 
         return transactionJson;
     }
@@ -39,7 +44,6 @@ public class BankTransactionsProducer {
         String topic = "bank-transactions";
 
         String[] customers =  new String[]{"John", "Smith", "Mike", "David", "Brown", "White"};
-        Double maxAmount = 10.0;
 
         // create producer properties
         Properties properties = new Properties();
@@ -55,20 +59,18 @@ public class BankTransactionsProducer {
         // create producer
         KafkaProducer<String, String> producer = new KafkaProducer<>(properties);
 
-        Random ran = new Random();
-        DecimalFormat df = new DecimalFormat("#.##");
 
         Integer index = 0;
 
         while(true) {
             ++index;
 
+            Random ran = new Random();
             Integer randomCustomerIndex = ran.nextInt(customers.length);
-            Double randomAmount = (ran.nextDouble() * maxAmount);
-            randomAmount = Double.valueOf(df.format(randomAmount));
+
             String customer = customers[randomCustomerIndex];
 
-            JsonObject transaction = createTransaction(customer, randomAmount);
+            JsonObject transaction = createTransaction(customer);
 
             // create producer record
             ProducerRecord<String, String> record = new ProducerRecord<>(topic, customer, transaction.toString());
